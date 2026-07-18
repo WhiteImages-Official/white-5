@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+PyGithub
+pynacl
+diffusers
+transformers
+accelerate
+peft
+pillow
