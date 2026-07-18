@@ -1,6 +1,6 @@
 import os
 import torch
-from diffusers import AutoPipelineForText2Image, DDIMScheduler, AutoencoderKL
+from diffusers import AutoPipelineForText2Image, DDIMScheduler
 from PIL import Image
 from typing import Optional
 from huggingface_hub import hf_hub_download
@@ -12,9 +12,9 @@ torch.set_num_threads(cores)
 print(f"[Model] Configured PyTorch to use {cores} CPU thread(s).", flush=True)
 
 MODEL_CODE: str = "white"
-MODEL_ID: str = "SG161222/Realistic_Vision_V5.1_noVAE"
+MODEL_ID: str = "emilianJR/epiCRealism"
 LORA_REPO: str = "ByteDance/Hyper-SD"
-LORA_FILE: str = "Hyper-SD15-4steps-lora.safetensors"
+LORA_FILE: str = "Hyper-SD15-8steps-CFG-lora.safetensors"
 _pipeline: Optional[AutoPipelineForText2Image] = None
 
 def get_pipeline() -> AutoPipelineForText2Image:
@@ -45,26 +45,17 @@ def get_pipeline() -> AutoPipelineForText2Image:
             clip_sample=False
         )
         
-        # Load standard high-quality VAE to fix colors and facial details
-        print("[Model] Loading high-quality VAE (sd-vae-ft-mse)...", flush=True)
-        vae = AutoencoderKL.from_pretrained(
-            "stabilityai/sd-vae-ft-mse",
-            torch_dtype=dtype,
-            use_safetensors=True
-        )
-        _pipeline.vae = vae
-        
         _pipeline.to(device)
-        print("[Model] Model loaded successfully with Realistic Vision (High-Quality VAE), 4-Step LoRA.", flush=True)
+        print("[Model] Model loaded successfully with epiCRealism (Native VAE) and 8-Step CFG LoRA.", flush=True)
     return _pipeline
 
 @torch.inference_mode()
 def generate_image(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0, width: int = 512, height: int = 512) -> Image.Image:
     pipe: AutoPipelineForText2Image = get_pipeline()
     
-    # Auto-adjust defaults from SD-Turbo (1 step, 0 guidance) to work beautifully with 4-Step LoRA (4 steps, 1.0 guidance)
-    steps = 4 if num_inference_steps <= 1 else num_inference_steps
-    guidance = 1.0 if guidance_scale <= 0.0 else guidance_scale
+    # Auto-adjust defaults to work beautifully with 8-Step CFG LoRA (8 steps, 5.0 guidance)
+    steps = 8 if num_inference_steps <= 1 else num_inference_steps
+    guidance = 5.0 if guidance_scale <= 1.0 else guidance_scale
     
     # Force 512x512 resolution for fast CPU runs (avoids 1024x1024 latency)
     w = 512 if width <= 0 else width
