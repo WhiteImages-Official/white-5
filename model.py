@@ -12,7 +12,7 @@ torch.set_num_threads(cores)
 print(f"[Model] Configured PyTorch to use {cores} CPU thread(s).", flush=True)
 
 MODEL_CODE: str = "white"
-MODEL_ID: str = "Lykon/dreamshaper-8"
+MODEL_ID: str = "SG161222/Realistic_Vision_V5.1_noVAE"
 LORA_REPO: str = "ByteDance/Hyper-SD"
 LORA_FILE: str = "Hyper-SD15-4steps-lora.safetensors"
 _pipeline: Optional[AutoPipelineForText2Image] = None
@@ -37,9 +37,12 @@ def get_pipeline() -> AutoPipelineForText2Image:
         _pipeline.load_lora_weights(lora_path)
         _pipeline.fuse_lora()
         
-        # Configure DDIMScheduler
-        print("[Model] Configuring DDIMScheduler...", flush=True)
-        _pipeline.scheduler = DDIMScheduler.from_config(_pipeline.scheduler.config)
+        # Configure DDIMScheduler with trailing timestep spacing for Hyper-SD
+        print("[Model] Configuring DDIMScheduler with trailing timestep spacing...", flush=True)
+        _pipeline.scheduler = DDIMScheduler.from_config(
+            _pipeline.scheduler.config,
+            timestep_spacing="trailing"
+        )
         
         # Load and set the Tiny VAE (TAESD) to make VAE decoding instantaneous on CPU
         print("[Model] Loading Tiny AutoEncoder (TAESD) VAE...", flush=True)
@@ -50,14 +53,14 @@ def get_pipeline() -> AutoPipelineForText2Image:
         )
         _pipeline.vae = vae
         _pipeline.to(device)
-        print("[Model] Model loaded successfully with DreamShaper-8, Hyper-SD LoRA and Tiny VAE.", flush=True)
+        print("[Model] Model loaded successfully with Realistic Vision, 4-Step LoRA and Tiny VAE.", flush=True)
     return _pipeline
 
 @torch.inference_mode()
 def generate_image(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0, width: int = 512, height: int = 512) -> Image.Image:
     pipe: AutoPipelineForText2Image = get_pipeline()
     
-    # Auto-adjust defaults from SD-Turbo (1 step, 0 guidance) to work beautifully with Hyper-SD LoRA (4 steps, 1.0 guidance)
+    # Auto-adjust defaults from SD-Turbo (1 step, 0 guidance) to work beautifully with 4-Step LoRA (4 steps, 1.0 guidance)
     steps = 4 if num_inference_steps <= 1 else num_inference_steps
     guidance = 1.0 if guidance_scale <= 0.0 else guidance_scale
     
