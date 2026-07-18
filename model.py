@@ -1,6 +1,6 @@
 import os
 import torch
-from diffusers import AutoPipelineForText2Image, DDIMScheduler
+from diffusers import AutoPipelineForText2Image, DDIMScheduler, AutoencoderKL
 from PIL import Image
 from typing import Optional
 from huggingface_hub import hf_hub_download
@@ -45,8 +45,17 @@ def get_pipeline() -> AutoPipelineForText2Image:
             clip_sample=False
         )
         
+        # Load standard high-quality VAE to fix colors and facial details
+        print("[Model] Loading high-quality VAE (sd-vae-ft-mse)...", flush=True)
+        vae = AutoencoderKL.from_pretrained(
+            "stabilityai/sd-vae-ft-mse",
+            torch_dtype=dtype,
+            use_safetensors=True
+        )
+        _pipeline.vae = vae
+        
         _pipeline.to(device)
-        print("[Model] Model loaded successfully with Realistic Vision (Native VAE), 4-Step LoRA.", flush=True)
+        print("[Model] Model loaded successfully with Realistic Vision (High-Quality VAE), 4-Step LoRA.", flush=True)
     return _pipeline
 
 @torch.inference_mode()
