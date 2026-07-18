@@ -44,10 +44,10 @@ def get_pipeline() -> StableDiffusionXLPipeline:
             timestep_spacing="trailing"
         )
         
-        # Load and set the Tiny VAE (TAESDXx) for SDXL to make VAE decoding instantaneous on CPU
-        print("[Model] Loading Tiny AutoEncoder (TAESDXx) VAE for SDXL...", flush=True)
+        # Load and set the Tiny VAE (TAESDXl) for SDXL to make VAE decoding instantaneous on CPU
+        print("[Model] Loading Tiny AutoEncoder (TAESDXl) VAE for SDXL...", flush=True)
         vae = AutoencoderTiny.from_pretrained(
-            "madebyollin/taesdxx",
+            "madebyollin/taesdxl",
             torch_dtype=dtype,
             use_safetensors=True
         )
