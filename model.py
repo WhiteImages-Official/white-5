@@ -1,6 +1,6 @@
 import os
 import torch
-from diffusers import AutoPipelineForText2Image, AutoencoderTiny, DDIMScheduler
+from diffusers import StableDiffusionXLPipeline, AutoencoderTiny, EulerDiscreteScheduler
 from PIL import Image
 from typing import Optional
 from huggingface_hub import hf_hub_download
@@ -12,12 +12,12 @@ torch.set_num_threads(cores)
 print(f"[Model] Configured PyTorch to use {cores} CPU thread(s).", flush=True)
 
 MODEL_CODE: str = "white"
-MODEL_ID: str = "SG161222/Realistic_Vision_V5.1_noVAE"
-LORA_REPO: str = "ByteDance/Hyper-SD"
-LORA_FILE: str = "Hyper-SD15-4steps-lora.safetensors"
-_pipeline: Optional[AutoPipelineForText2Image] = None
+MODEL_ID: str = "segmind/SSD-1B"
+LORA_REPO: str = "ByteDance/SDXL-Lightning"
+LORA_FILE: str = "sdxl_lightning_4step_lora.safetensors"
+_pipeline: Optional[StableDiffusionXLPipeline] = None
 
-def get_pipeline() -> AutoPipelineForText2Image:
+def get_pipeline() -> StableDiffusionXLPipeline:
     global _pipeline
     if _pipeline is None:
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -25,54 +25,58 @@ def get_pipeline() -> AutoPipelineForText2Image:
         dtype: torch.dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
         
         print(f"[Model] Loading base model ID '{MODEL_ID}' on device '{device}'...", flush=True)
-        _pipeline = AutoPipelineForText2Image.from_pretrained(
+        _pipeline = StableDiffusionXLPipeline.from_pretrained(
             MODEL_ID,
             torch_dtype=dtype,
             use_safetensors=True
         )
         
-        # Load Hyper-SD LoRA
-        print(f"[Model] Loading Hyper-SD LoRA weights '{LORA_FILE}' from repository '{LORA_REPO}'...", flush=True)
+        # Load SDXL-Lightning LoRA
+        print(f"[Model] Loading SDXL-Lightning LoRA weights '{LORA_FILE}'...", flush=True)
         lora_path = hf_hub_download(repo_id=LORA_REPO, filename=LORA_FILE)
         _pipeline.load_lora_weights(lora_path)
         _pipeline.fuse_lora()
         
-        # Configure DDIMScheduler with trailing timestep spacing for Hyper-SD
-        print("[Model] Configuring DDIMScheduler with trailing timestep spacing...", flush=True)
-        _pipeline.scheduler = DDIMScheduler.from_config(
+        # Configure EulerDiscreteScheduler with trailing timestep spacing for SDXL-Lightning
+        print("[Model] Configuring EulerDiscreteScheduler...", flush=True)
+        _pipeline.scheduler = EulerDiscreteScheduler.from_config(
             _pipeline.scheduler.config,
             timestep_spacing="trailing"
         )
         
-        # Load and set the Tiny VAE (TAESD) to make VAE decoding instantaneous on CPU
-        print("[Model] Loading Tiny AutoEncoder (TAESD) VAE...", flush=True)
+        # Load and set the Tiny VAE (TAESDXx) for SDXL to make VAE decoding instantaneous on CPU
+        print("[Model] Loading Tiny AutoEncoder (TAESDXx) VAE for SDXL...", flush=True)
         vae = AutoencoderTiny.from_pretrained(
-            "madebyollin/taesd",
+            "madebyollin/taesdxx",
             torch_dtype=dtype,
             use_safetensors=True
         )
         _pipeline.vae = vae
         _pipeline.to(device)
-        print("[Model] Model loaded successfully with Realistic Vision, 4-Step LoRA and Tiny VAE.", flush=True)
+        print("[Model] Model loaded successfully with Segmind SSD-1B, SDXL-Lightning 4-Step LoRA and Tiny VAE.", flush=True)
     return _pipeline
 
 @torch.inference_mode()
 def generate_image(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0, width: int = 512, height: int = 512) -> Image.Image:
-    pipe: AutoPipelineForText2Image = get_pipeline()
+    pipe: StableDiffusionXLPipeline = get_pipeline()
     
-    # Auto-adjust defaults from SD-Turbo (1 step, 0 guidance) to work beautifully with 4-Step LoRA (4 steps, 1.0 guidance)
+    # Auto-adjust defaults for SDXL-Lightning (4 steps, 0.0 guidance)
     steps = 4 if num_inference_steps <= 1 else num_inference_steps
-    guidance = 1.0 if guidance_scale <= 0.0 else guidance_scale
+    guidance = 0.0 if guidance_scale <= 0.0 else guidance_scale
     
-    print(f"[Model] Starting image generation for prompt: '{prompt}' (steps={steps}, guidance={guidance}, size={width}x{height})...", flush=True)
+    # Map 512 defaults to 1024 for high-resolution SDXL output
+    w = 1024 if width <= 512 else width
+    h = 1024 if height <= 512 else height
+    
+    print(f"[Model] Starting image generation for prompt: '{prompt}' (steps={steps}, guidance={guidance}, size={w}x{h})...", flush=True)
     
     # Run the model
     result = pipe(
         prompt=prompt,
         num_inference_steps=steps,
         guidance_scale=guidance,
-        width=width,
-        height=height
+        width=w,
+        height=h
     )
     
     image: Image.Image = result.images[0]
