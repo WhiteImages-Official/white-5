@@ -48,8 +48,8 @@ def get_pipeline() -> OVStableDiffusionXLPipeline:
         compile=False,
     )
 
-    print(f"[Model] Reshaping static shapes to {WIDTH}x{HEIGHT}...", flush=True)
-    _pipeline.reshape(batch_size=1, height=HEIGHT, width=WIDTH, num_images_per_prompt=1)
+    print(f"[Model] Reshaping shapes to {WIDTH}x{HEIGHT} (batch_size=-1 for dynamic CFG support)...", flush=True)
+    _pipeline.reshape(batch_size=-1, height=HEIGHT, width=WIDTH, num_images_per_prompt=1)
 
     print("[Model] Compiling OpenVINO graph...", flush=True)
     _pipeline.compile()
