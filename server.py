@@ -16,9 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from github import Github, Auth
 from github.GithubException import UnknownObjectException
 
-from model import generate_image, MODEL_CODE
+from model import generate_image, MODEL_ID
 
-app: FastAPI = FastAPI(title="Sana Sprint Image Generation API Server")
+app: FastAPI = FastAPI(title="White Cloud Image Generation API Server")
 
 # Enable CORS for all origins to allow browser clients to communicate via Cloudflare tunnel
 app.add_middleware(
