@@ -33,6 +33,7 @@ class ImageRequest(BaseModel):
     prompt: str
     num_inference_steps: int = 1
     guidance_scale: float = 0.0
+    guidance: float = 0.0
     width: int = 512
     height: int = 512
 
@@ -246,11 +247,14 @@ async def generate_image_endpoint(req: ImageRequest) -> dict:
         raise HTTPException(status_code=400, detail="Prompt parameter is required.")
     
     try:
+        # Extract the guidance scale, supporting both standard API naming and new frontend custom naming
+        guidance_val = req.guidance if req.guidance > 0.0 else req.guidance_scale
+        
         # Run directly on the main thread to utilize all available CPU cores without OpenMP deadlock
         image = generate_image(
             req.prompt, 
             req.num_inference_steps, 
-            req.guidance_scale,
+            guidance_val,
             req.width,
             req.height
         )
