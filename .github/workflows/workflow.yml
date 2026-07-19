@@ -1,4 +1,4 @@
-name: Run Sana-Sprint Images
+name: Run SDXL-Turbo Images
 
 on:
   workflow_dispatch:
@@ -12,30 +12,23 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - name: Cache Hugging Face Model (raw weights, downloaded during export)
-        id: cache-hf-model
-        uses: actions/cache@v4
-        with:
-          path: hf_cache
-          key: hf-sana-sprint-0.6b-v1
-
-      # This is the important new cache: the *converted + INT8-quantized*
-      # OpenVINO IR model. Export is the slow, CPU-heavy step (runs the
-      # PyTorch model once to trace it) -- we want to do this exactly once,
-      # not on every workflow run.
-      - name: Cache Converted OpenVINO Model
+      # SDXL-Turbo OpenVINO INT8 is a PRE-CONVERTED model (rupeshs/sdxl-turbo-openvino-int8).
+      # There is no export/quantization step anymore -- we just download the
+      # already-converted IR files straight from the Hub. This single cache
+      # covers that whole download.
+      - name: Cache OpenVINO Model
         id: cache-ov-model
         uses: actions/cache@v4
         with:
-          path: ov_cache
-          key: ov-sana-sprint-0.6b-int8-512-v1
+          path: hf_cache
+          key: hf-sdxl-turbo-openvino-int8-v1
 
       - name: Cache Python Virtual Environment
         id: cache-venv
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-sana-sprint-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-cpu-v1
+          key: venv-sdxl-turbo-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-cpu-v1
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -50,18 +43,14 @@ jobs:
           .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           .venv/bin/pip install -r requirements.txt
 
-      # This step does double duty: on first run it downloads the raw HF
-      # weights AND exports+quantizes them to OpenVINO IR, populating both
-      # caches above. On subsequent runs, if the OV cache already hit, this
-      # is nearly instant since get_pipeline() finds the cached IR model
-      # and skips straight to compile.
-      - name: Warm Model Caches (download + export if needed)
+      # Just a download + compile check -- no tracing, no NNCF quantization,
+      # nothing that can OOM this runner. This should be quick and safe.
+      - name: Warm Model Cache (download pre-converted OpenVINO model)
         if: steps.cache-ov-model.outputs.cache-hit != 'true'
         env:
           HF_HOME: ${{ github.workspace }}/hf_cache
-          OV_MODEL_DIR: ${{ github.workspace }}/ov_cache/sana-sprint-0.6b-int8
         run: |
-          echo "OpenVINO model cache miss. Downloading + exporting Sana-Sprint 0.6B to OpenVINO INT8..."
+          echo "Model cache miss. Downloading pre-converted SDXL-Turbo OpenVINO INT8..."
           .venv/bin/python -c "from model import get_pipeline; get_pipeline()"
 
   run-server:
@@ -73,17 +62,11 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - name: Restore Hugging Face Model Cache
+      - name: Restore OpenVINO Model Cache
         uses: actions/cache@v4
         with:
           path: hf_cache
-          key: hf-sana-sprint-0.6b-v1
-
-      - name: Restore Converted OpenVINO Model Cache
-        uses: actions/cache@v4
-        with:
-          path: ov_cache
-          key: ov-sana-sprint-0.6b-int8-512-v1
+          key: hf-sdxl-turbo-openvino-int8-v1
 
       - name: Free Disk Space
         run: |
@@ -93,23 +76,21 @@ jobs:
           sudo rm -rf /opt/ghc
           df -h
 
-      # NOTE: intentionally NOT adding a 10GB swapfile here. Sana-Sprint 0.6B
-      # INT8 should comfortably fit in the runner's ~7GB RAM without ever
-      # touching swap. Swap-backed inference turns weight reads into disk
-      # I/O and can make a diffusion model's per-step latency 10-50x worse,
-      # not just "a bit slower" -- easily blowing well past the 60s target
-      # this whole setup exists to hit. If you see OOM in practice despite
-      # this, that's a real signal something else is wrong (e.g. cache
-      # missed and it's trying to hold both raw PyTorch weights AND the
-      # exported OV model in memory at once) -- fix that first rather than
-      # papering over it with swap.
+      # No swapfile here. This is a pre-converted INT8 model with no export
+      # step, so there's no memory-heavy tracing/quantization pass to
+      # accommodate -- unlike the earlier Sana-Sprint attempt, there should
+      # be no reason to fall back to swap for this model at all. If you do
+      # see OOM in practice, that's a real signal worth investigating
+      # directly (e.g. cache miss silently triggering a re-download+convert
+      # path) rather than papering over it with swap, since swap-backed
+      # inference can make per-step latency 10-50x worse.
 
       - name: Cache Python Virtual Environment
         id: cache-venv
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-sana-sprint-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-cpu-v1
+          key: venv-sdxl-turbo-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-cpu-v1
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -126,6 +107,5 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GH_ORG: ${{ secrets.GH_ORG }}
           HF_HOME: ${{ github.workspace }}/hf_cache
-          OV_MODEL_DIR: ${{ github.workspace }}/ov_cache/sana-sprint-0.6b-int8
         run: |
           .venv/bin/python -u server.py
