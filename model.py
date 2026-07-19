@@ -1,105 +1,88 @@
 import os
-from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-
-# Sana-Sprint requires diffusers>=0.33.0 for OVSanaSprintPipeline support in optimum-intel.
-from optimum.intel.openvino import OVSanaSprintPipeline
+from optimum.intel.openvino.modeling_diffusion import OVStableDiffusionXLPipeline
 
 # ---------------------------------------------------------------------------
-# Config
+# Pre-converted OpenVINO INT8 SDXL-Turbo. No export step -- this is a
+# ready-to-load IR model published by rupeshs (same maintainer as the
+# original working LCM-Dreamshaper model), so it carries over the exact
+# pattern that's already proven to load without OOM on this box.
+#
+# Real reported reference point (not a guess): ~5s per image on an Intel
+# Core i7 desktop CPU at 512x512, 1 step, per the model's own usage notes.
+# Your 2 vCPU cloud runner is very likely weaker than a full i7, so expect
+# somewhat more than 5s -- but this is a real anchor, unlike SANA-Sprint
+# where no CPU number exists anywhere.
+#
+# Quality note: SDXL-Turbo at 1-4 steps was preferred by human evaluators
+# over 4-step LCM-XL, and even over a full 50-step SDXL run at just 4 steps
+# -- a genuine quality step up from the SD1.5-LCM setup, not a lateral move.
 # ---------------------------------------------------------------------------
-# IMPORTANT: use the "_diffusers" suffixed repo, not the bare NVLabs-format
-# repo. The diffusers-native `SanaSprintPipeline` (and therefore optimum-intel's
-# export=True path, which loads through diffusers under the hood) is confirmed
-# to work against this repo specifically -- the un-suffixed repo may be in the
-# original NVLabs checkpoint format instead, which diffusers' auto-export
-# likely can't consume directly. If export=True fails on this repo, that's
-# the first thing to check.
-MODEL_ID: str = "Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers"
-
-# Where we cache the converted OpenVINO IR model after first export.
-# Persisted via the GitHub Actions cache step (path: ov_cache) so we only
-# pay the export cost once.
-OV_MODEL_DIR: str = os.environ.get("OV_MODEL_DIR", "./ov_cache/sana-sprint-0.6b-int8")
+MODEL_ID: str = "rupeshs/sdxl-turbo-openvino-int8"
 
 WIDTH: int = 512
 HEIGHT: int = 512
 NUM_THREADS: int = 2
 
-_pipeline: Optional[OVSanaSprintPipeline] = None
+_pipeline: Optional[OVStableDiffusionXLPipeline] = None
 
 
-def get_pipeline() -> OVSanaSprintPipeline:
+def get_pipeline() -> OVStableDiffusionXLPipeline:
     global _pipeline
     if _pipeline is not None:
         return _pipeline
 
+    print(f"[Model] Loading pre-converted OpenVINO INT8 model '{MODEL_ID}'...", flush=True)
+
     ov_config = {
         "INFERENCE_NUM_THREADS": NUM_THREADS,
         "PERFORMANCE_HINT": "LATENCY",
+        "CACHE_DIR": "",
     }
 
-    if Path(OV_MODEL_DIR).exists() and any(Path(OV_MODEL_DIR).iterdir()):
-        # Fast path: already converted + quantized on a previous run.
-        print(f"[Model] Loading cached OpenVINO INT8 model from '{OV_MODEL_DIR}'...", flush=True)
-        _pipeline = OVSanaSprintPipeline.from_pretrained(
-            OV_MODEL_DIR,
-            ov_config=ov_config,
-            compile=False,
-        )
-    else:
-        # First run: export from the original PyTorch weights straight to
-        # OpenVINO IR with INT8 weight compression, then persist to disk.
-        print(f"[Model] No OpenVINO cache found. Exporting '{MODEL_ID}' to OpenVINO INT8...", flush=True)
-        _pipeline = OVSanaSprintPipeline.from_pretrained(
-            MODEL_ID,
-            export=True,
-            weight_format="int8",  # nncf-backed weight-only INT8 quantization
-            ov_config=ov_config,
-            compile=False,
-        )
-        print(f"[Model] Saving converted model to '{OV_MODEL_DIR}' for future runs...", flush=True)
-        Path(OV_MODEL_DIR).mkdir(parents=True, exist_ok=True)
-        _pipeline.save_pretrained(OV_MODEL_DIR)
+    _pipeline = OVStableDiffusionXLPipeline.from_pretrained(
+        MODEL_ID,
+        ov_config=ov_config,
+        compile=False,
+    )
 
-    # Static reshape locks input/output shapes, which lets OpenVINO skip
-    # re-planning the graph on every call -- meaningful latency win, but
-    # means every generation from this point on MUST use WIDTH x HEIGHT.
     print(f"[Model] Reshaping static shapes to {WIDTH}x{HEIGHT}...", flush=True)
     _pipeline.reshape(batch_size=1, height=HEIGHT, width=WIDTH, num_images_per_prompt=1)
 
     print("[Model] Compiling OpenVINO graph...", flush=True)
     _pipeline.compile()
-    print("[Model] Sana-Sprint OpenVINO INT8 pipeline ready.", flush=True)
+    print("[Model] SDXL-Turbo OpenVINO INT8 pipeline ready.", flush=True)
 
     return _pipeline
 
 
 def generate_image(
     prompt: str,
-    num_inference_steps: int = 4,
-    guidance_scale: float = 4.5,
+    num_inference_steps: int = 2,
+    guidance_scale: float = 1.0,
     width: int = WIDTH,
     height: int = HEIGHT,
 ) -> Image.Image:
     """
-    Sana-Sprint is a consistency-distilled model supporting 1-4 step
-    inference. The official demo/reference default is 4 steps -- drop to
-    2 for a speed test, but expect a visible quality dip below 4.
-    guidance_scale=4.5 mirrors the default exposed in the official Gradio
-    demo's "Advanced Settings" -- unlike vanilla LCM, Sana-Sprint keeps real
-    classifier-free guidance active rather than pinning guidance_scale=1.0,
-    so don't copy that convention over from the old SD1.5-LCM setup.
+    SDXL-Turbo was trained WITHOUT classifier-free guidance -- keep
+    guidance_scale=1.0 (i.e. effectively disabled), matching both the
+    model's own example code and its training setup. Don't reintroduce
+    a higher CFG value here; it wasn't trained for it and quality will
+    likely get worse, not better.
+
+    1 step is the model's native fast mode. Try 2-4 steps (see the
+    SDXL-Lightning-2steps-openvino-int8 sibling model for a 2-step-native
+    alternative) if 1-step output looks too soft for your use case --
+    each extra step costs roughly proportional extra time on CPU.
     """
     pipe = get_pipeline()
 
     if width != WIDTH or height != HEIGHT:
         print(
             f"[Model] Warning: requested {width}x{height} differs from the "
-            f"statically reshaped {WIDTH}x{HEIGHT}. Ignoring override -- "
-            f"reshape the pipeline again if you truly need a different size.",
+            f"statically reshaped {WIDTH}x{HEIGHT}. Ignoring override.",
             flush=True,
         )
 
