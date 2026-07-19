@@ -31,7 +31,7 @@ app.add_middleware(
 
 class ImageRequest(BaseModel):
     prompt: str
-    num_inference_steps: int = 1
+    num_inference_steps: int = 2
     guidance_scale: float = 0.0
     guidance: float = 0.0
     width: int = 512
