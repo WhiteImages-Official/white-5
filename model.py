@@ -5,7 +5,7 @@ from optimum.intel.openvino import OVStableDiffusionPipeline
 from diffusers import LCMScheduler
 
 MODEL_CODE: str = "white"
-MODEL_ID: str = "rupeshs/sd15-lcm-square-openvino-int8"
+MODEL_ID: str = "Intel/sd-1.5-lcm-openvino"
 _pipeline: Optional[OVStableDiffusionPipeline] = None
 
 def get_pipeline() -> OVStableDiffusionPipeline:
@@ -61,6 +61,8 @@ def get_pipeline() -> OVStableDiffusionPipeline:
         print("[Model] Compiling OpenVINO graph...", flush=True)
         _pipeline.compile()
         print("[Model] OpenVINO model loaded and compiled successfully.", flush=True)
+        # - [x] Modify `components/dashboard/GenerateImageTab.tsx` to fetch endpoint beforehand and display persistent top banner
+        # - [ ] Verify build/compile consistency
     return _pipeline
 
 def generate_image(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0, width: int = 512, height: int = 512) -> Image.Image:
