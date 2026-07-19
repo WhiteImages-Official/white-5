@@ -1,14 +1,14 @@
 import os
 from PIL import Image
 from typing import Optional
-from optimum.intel.openvino import OVStableDiffusionPipeline
+from optimum.intel.openvino import OVLatentConsistencyModelPipeline
 from diffusers import LCMScheduler
 
 MODEL_CODE: str = "white"
-MODEL_ID: str = "Intel/sd-1.5-lcm-openvino"
-_pipeline: Optional[OVStableDiffusionPipeline] = None
+MODEL_ID: str = "rupeshs/LCM-dreamshaper-v7-openvino-int8"
+_pipeline: Optional[OVLatentConsistencyModelPipeline] = None
 
-def get_pipeline() -> OVStableDiffusionPipeline:
+def get_pipeline() -> OVLatentConsistencyModelPipeline:
     global _pipeline
     if _pipeline is None:
         print(f"[Model] Loading OpenVINO INT8 model ID '{MODEL_ID}' on CPU...", flush=True)
@@ -20,7 +20,7 @@ def get_pipeline() -> OVStableDiffusionPipeline:
         }
         
         # Load the pre-converted OpenVINO pipeline with safety checker disabled
-        _pipeline = OVStableDiffusionPipeline.from_pretrained(
+        _pipeline = OVLatentConsistencyModelPipeline.from_pretrained(
             MODEL_ID,
             ov_config=ov_config,
             safety_checker=None,
@@ -61,8 +61,6 @@ def get_pipeline() -> OVStableDiffusionPipeline:
         print("[Model] Compiling OpenVINO graph...", flush=True)
         _pipeline.compile()
         print("[Model] OpenVINO model loaded and compiled successfully.", flush=True)
-        # - [x] Modify `components/dashboard/GenerateImageTab.tsx` to fetch endpoint beforehand and display persistent top banner
-        # - [ ] Verify build/compile consistency
     return _pipeline
 
 def generate_image(prompt: str, num_inference_steps: int = 1, guidance_scale: float = 0.0, width: int = 512, height: int = 512) -> Image.Image:
